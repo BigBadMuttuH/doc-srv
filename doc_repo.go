@@ -12,6 +12,9 @@ import (
 	"time"
 
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/text"
 )
 
 type Document struct {
@@ -115,10 +118,45 @@ func (r *DocRepository) scan() ([]Section, error) {
 						// Read README content
 						content, err := os.ReadFile(filepath.Join(subDirPath, subE.Name()))
 						if err == nil {
+							// Configure goldmark
+							md := goldmark.New()
+							context := parser.NewContext()
+							
+							// Parse
+							reader := text.NewReader(content)
+							doc := md.Parser().Parse(reader, parser.WithContext(context))
+
+							// Transform AST: Rewrite image URLs
+							ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+								if !entering {
+									return ast.WalkContinue, nil
+								}
+								
+								if img, ok := n.(*ast.Image); ok {
+									dest := string(img.Destination)
+									// If path is relative (not starting with / or http), prepend /docs/<subDir>/
+									if !strings.HasPrefix(dest, "/") && !strings.HasPrefix(dest, "http") {
+										newDest := fmt.Sprintf("/docs/%s/%s", subDirName, dest)
+										img.Destination = []byte(newDest)
+									}
+								}
+								
+								if link, ok := n.(*ast.Link); ok {
+									dest := string(link.Destination)
+									if !strings.HasPrefix(dest, "/") && !strings.HasPrefix(dest, "http") {
+										newDest := fmt.Sprintf("/docs/%s/%s", subDirName, dest)
+										link.Destination = []byte(newDest)
+									}
+								}
+								return ast.WalkContinue, nil
+							})
+
+							// Render
 							var buf bytes.Buffer
-							if err := goldmark.Convert(content, &buf); err == nil {
+							if err := md.Renderer().Render(&buf, content, doc); err == nil {
 								readmeContent = template.HTML(buf.String())
 							} else {
+								// Fallback
 								readmeContent = template.HTML(template.HTMLEscapeString(string(content)))
 							}
 						}

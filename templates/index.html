@@ -60,16 +60,22 @@
                 var items = section.getElementsByTagName('li');
                 var readme = section.querySelector('.readme');
                 
+                // Reset highlight
+                if (readme) {
+                    removeHighlight(readme);
+                }
+
                 // Check if filter matches section name
                 var summary = section.querySelector('summary');
                 var sectionNameMatch = summary && summary.innerText.toLowerCase().indexOf(filter) > -1;
 
-                // Check if filter matches README content
+                // Check if filter matches README content and highlight
                 var readmeMatch = false;
-                if (readme) {
-                    var readmeText = readme.innerText || readme.textContent;
-                    if (readmeText.toLowerCase().indexOf(filter) > -1) {
+                if (readme && filter.length > 0) {
+                    var text = readme.innerText || readme.textContent;
+                    if (text.toLowerCase().indexOf(filter) > -1) {
                         readmeMatch = true;
+                        highlightText(readme, filter);
                     }
                 }
 
@@ -90,16 +96,65 @@
                 }
 
                 // Show section if it has visible items OR if the section/readme itself matched
-                // (If section/readme matched, hasVisibleItem is already true because we showed all items)
-                if (hasVisibleItem) {
+                if (hasVisibleItem || (filter.length > 0 && (sectionNameMatch || readmeMatch))) {
                     section.style.display = "";
                     if (filter.length > 0) {
                         section.open = true;
+                        // Scroll to first match in readme if it matched
+                        if (readmeMatch) {
+                             var firstHighlight = readme.querySelector('.highlight');
+                             if (firstHighlight) {
+                                 // smooth scroll to it
+                                 firstHighlight.scrollIntoView({behavior: "smooth", block: "center"});
+                             }
+                        }
                     }
                 } else {
                     section.style.display = "none";
                 }
             }
+        }
+
+        function highlightText(element, text) {
+            if (text.length === 0) return;
+            var innerHTML = element.innerHTML;
+            var index = innerHTML.toLowerCase().indexOf(text);
+            if (index >= 0) { 
+                // This is a naive implementation that might break HTML tags if the search text matches tag attributes.
+                // A better approach is to traverse text nodes.
+                walkAndHighlight(element, text);
+            }
+        }
+        
+        function walkAndHighlight(node, text) {
+            if (node.nodeType === 3) { // Text node
+                var val = node.nodeValue;
+                var lowerVal = val.toLowerCase();
+                var idx = lowerVal.indexOf(text);
+                if (idx >= 0) {
+                    var span = document.createElement('span');
+                    span.className = 'highlight';
+                    var matchedText = node.splitText(idx);
+                    matchedText.splitText(text.length);
+                    span.appendChild(matchedText.cloneNode(true));
+                    matchedText.parentNode.replaceChild(span, matchedText);
+                    return true; // Stop after first match per node to keep it simple or continue? Let's continue.
+                }
+            } else if (node.nodeType === 1 && node.childNodes && !/(script|style)/i.test(node.tagName) && node.className !== 'highlight') {
+                 for (var i = 0; i < node.childNodes.length; i++) {
+                     walkAndHighlight(node.childNodes[i], text);
+                 }
+            }
+        }
+
+        function removeHighlight(element) {
+             var highlights = element.querySelectorAll('.highlight');
+             for (var i = 0; i < highlights.length; i++) {
+                 var span = highlights[i];
+                 var parent = span.parentNode;
+                 parent.replaceChild(document.createTextNode(span.innerText), span);
+                 parent.normalize(); // Merge text nodes
+             }
         }
 
         function expandAll() {

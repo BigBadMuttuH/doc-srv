@@ -181,4 +181,14 @@ summary h2 {
     background-color: rgba(0, 0, 0, 0.3);
     border-radius: 6px;
 }
-.readme ul, .readme ol { padding-left: 2em; margin-top: 0; margin-bottom: 16px; }
+.readme img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+}
+.highlight {
+    background-color: #ffd86b;
+    color: #000;
+    border-radius: 2px;
+    padding: 0 2px;
+}
