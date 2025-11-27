@@ -12,7 +12,8 @@ bin/
 # Vendor
 vendor/
 
-# IDEs
-.vscode/
-.idea/
+# Temporary files and backups
+*~
+*.tmp
+*.bak
 docs
