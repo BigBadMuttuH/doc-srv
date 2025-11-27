@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Справочная система</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="page">
+        <header class="hero">
+            <div class="hero-badge">Мурманская таможня</div>
+            <h1 class="hero-title">Список ключевых нормативных документов</h1>
+            <p class="hero-subtitle">ФТС России, Северо-Западного таможенного управления и Мурманской таможни</p>
+        </header>
+
+        <div class="main-content">
+            <div class="search-block">
+                <input type="text" id="searchInput" class="search-input" placeholder="🔍 По названию документа..." onkeyup="filterDocs()">
+                <div class="toolbar">
+                    <button type="button" class="toolbar-button" onclick="expandAll()">Развернуть все</button>
+                    <button type="button" class="toolbar-button" onclick="collapseAll()">Свернуть все</button>
+                </div>
+            </div>
+
+            <div class="sections">
+            {{range .}}
+                <details>
+                    <summary><h2>{{.Name}} ({{len .Documents}})</h2></summary>
+
+                    {{if .Readme}}
+                    <div class="readme">{{.Readme}}</div>
+                    {{end}}
+
+                    <ul>
+                        {{range .Documents}}
+                        <li><a href="{{.URL}}" target="_blank">📄 {{.Name}}</a></li>
+                        {{end}}
+                    </ul>
+                </details>
+            {{else}}
+                <p>Нет доступных документов.</p>
+            {{end}}
+            </div>
+        </div>
+
+        <footer class="footer">
+            <span>©Мурманска таможня · Внутренняя справочная система</span>
+            <span>Разделов: {{len .}}</span>
+        </footer>
+    </div>
+
+    <script>
+        function filterDocs() {
+            var input = document.getElementById('searchInput');
+            var filter = input.value.toLowerCase();
+            var sections = document.getElementsByTagName('details');
+
+            for (var i = 0; i < sections.length; i++) {
+                var section = sections[i];
+                var items = section.getElementsByTagName('li');
+                var hasVisible = false;
+
+                for (var j = 0; j < items.length; j++) {
+                    var item = items[j];
+                    var text = item.innerText || item.textContent;
+                    if (text.toLowerCase().indexOf(filter) > -1) {
+                        item.style.display = "";
+                        hasVisible = true;
+                    } else {
+                        item.style.display = "none";
+                    }
+                }
+
+                if (hasVisible) {
+                    section.style.display = "";
+                    // Automatically expand if searching
+                    if (filter.length > 0) {
+                        section.open = true;
+                    }
+                } else {
+                    section.style.display = "none";
+                }
+            }
+        }
+
+        function expandAll() {
+            var sections = document.getElementsByTagName('details');
+            for (var i = 0; i < sections.length; i++) {
+                sections[i].open = true;
+                sections[i].style.display = "";
+
+                var items = sections[i].getElementsByTagName('li');
+                for (var j = 0; j < items.length; j++) {
+                    items[j].style.display = "";
+                }
+            }
+        }
+
+        function collapseAll() {
+            var sections = document.getElementsByTagName('details');
+            for (var i = 0; i < sections.length; i++) {
+                sections[i].open = false;
+                sections[i].style.display = "";
+
+                var items = sections[i].getElementsByTagName('li');
+                for (var j = 0; j < items.length; j++) {
+                    items[j].style.display = "";
+                }
+            }
+        }
+    </script>
+</body>
+</html>
