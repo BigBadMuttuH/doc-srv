@@ -8,9 +8,10 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
+	"path/filepath"
 	"time"
+
+	"github.com/kardianos/service"
 )
 
 //go:embed templates/index.html static/*
@@ -18,22 +19,39 @@ var content embed.FS
 
 var accessLog *log.Logger
 
-func main() {
-	// Config
-	docsDir := flag.String("dir", "./docs", "Directory containing PDF files")
-	port := flag.String("port", "8080", "Server port")
-	flag.Parse()
+// Program structures.
+// Define Start and Stop methods.
+type program struct {
+	server    *http.Server
+	port      string
+	docsDir   string
+	rotWriter *rotatingWriter
+}
 
-	// Access log with rotation
-	rotWriter, err := newRotatingWriter("access.log", maxLogSizeBytes)
-	if err != nil {
-		log.Fatalf("Could not initialize access.log: %v", err)
+func (p *program) Start(s service.Service) error {
+	// Set working directory to the same directory as the executable
+	// so that "docs" and logs are found correctly relative to the exe.
+	if service.Interactive() {
+		log.Printf("Running in interactive mode")
+	} else {
+		log.Printf("Running as service")
+		if exePath, err := os.Executable(); err == nil {
+			if err := os.Chdir(filepath.Dir(exePath)); err != nil {
+				log.Printf("Failed to change directory: %v", err)
+			}
+		}
 	}
-	defer rotWriter.Close()
-	accessLog = log.New(rotWriter, "", log.LstdFlags)
+
+	// Initialize Logging
+	var err error
+	p.rotWriter, err = newRotatingWriter("access.log", maxLogSizeBytes)
+	if err != nil {
+		return err
+	}
+	accessLog = log.New(p.rotWriter, "", log.LstdFlags)
 
 	// Doc Repository
-	repo := NewDocRepository(*docsDir, 5*time.Minute)
+	repo := NewDocRepository(p.docsDir, 5*time.Minute)
 
 	// Parse Template
 	tmpl, err := template.ParseFS(content, "templates/index.html")
@@ -41,8 +59,11 @@ func main() {
 		log.Fatalf("Failed to parse template: %v", err)
 	}
 
+	// Handlers
+	mux := http.NewServeMux()
+
 	// Handler - List
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
@@ -68,39 +89,83 @@ func main() {
 
 	// Handler - Static (CSS)
 	staticServer := http.FileServer(http.FS(content))
-	http.Handle("/static/", staticServer)
+	mux.Handle("/static/", staticServer)
 
 	// Handler - Serve documents with logging
-	docFS := http.FileServer(http.Dir(*docsDir))
-	http.Handle("/docs/", http.StripPrefix("/docs/", loggingMiddleware(docFS)))
+	docFS := http.FileServer(http.Dir(p.docsDir))
+	mux.Handle("/docs/", http.StripPrefix("/docs/", loggingMiddleware(docFS)))
 
-	// Server
-	srv := &http.Server{
-		Addr:    ":" + *port,
-		Handler: nil, // DefaultServeMux
+	p.server = &http.Server{
+		Addr:    ":" + p.port,
+		Handler: mux,
 	}
 
-	// Graceful Shutdown
+	// Start Server in goroutine
 	go func() {
-		log.Printf("Server starting on http://localhost:%s", *port)
-		log.Printf("Serving documents from %s", *docsDir)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("listen: %s\n", err)
+		log.Printf("Server starting on http://localhost:%s", p.port)
+		log.Printf("Serving documents from %s", p.docsDir)
+		if err := p.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("Listen error: %v", err)
 		}
 	}()
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	log.Println("Shutting down server...")
+	return nil
+}
 
+func (p *program) Stop(s service.Service) error {
+	log.Println("Shutting down server...")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatal("Server forced to shutdown: ", err)
+
+	if err := p.server.Shutdown(ctx); err != nil {
+		log.Printf("Server forced to shutdown: %v", err)
+	}
+
+	if p.rotWriter != nil {
+		p.rotWriter.Close()
 	}
 
 	log.Println("Server exiting")
+	return nil
+}
+
+func main() {
+	// Config
+	docsDir := flag.String("dir", "./docs", "Directory containing PDF files")
+	port := flag.String("port", "8080", "Server port")
+	svcFlag := flag.String("service", "", "Control the system service: install, uninstall, start, stop")
+	flag.Parse()
+
+	svcConfig := &service.Config{
+		Name:        "DocSrv",
+		DisplayName: "Corporate Doc Server",
+		Description: "HTTP server for serving PDF documents.",
+		Arguments:   []string{"-port", *port, "-dir", *docsDir},
+	}
+
+	prg := &program{
+		port:    *port,
+		docsDir: *docsDir,
+	}
+
+	s, err := service.New(prg, svcConfig)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Handle service controls
+	if *svcFlag != "" {
+		err = service.Control(s, *svcFlag)
+		if err != nil {
+			log.Fatalf("Valid actions: %q\nError: %s", service.ControlAction, err)
+		}
+		return
+	}
+
+	// Run
+	if err = s.Run(); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func loggingMiddleware(next http.Handler) http.Handler {

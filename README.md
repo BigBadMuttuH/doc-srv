@@ -24,10 +24,16 @@
 
 ### Сборка и деплой
 
-Для создания исполняемого файла:
+Для создания исполняемого файла (Windows):
 
 ```bash
 go build -o doc-srv.exe .
+```
+
+Для кросс-компиляции под Windows (если собираете на Linux/macOS):
+
+```bash
+GOOS=windows GOARCH=amd64 go build -o doc-srv.exe .
 ```
 
 **На сервере:**
@@ -41,16 +47,28 @@ go build -o doc-srv.exe .
     .\doc-srv.exe
     ```
 
-### Конфигурация
+### Установка как служба Windows (Service)
 
-Параметры запуска:
+Вы можете установить приложение как системную службу, чтобы оно запускалось автоматически при старте Windows.
 
-*   `-port`: Порт сервера (по умолчанию `8080`).
-*   `-dir`: Путь к папке с документами (по умолчанию `./docs`).
+1.  Запустите командную строку (PowerShell или CMD) **от имени администратора**.
+2.  Установите службу:
+    ```powershell
+    .\doc-srv.exe -service install
+    ```
+    *При установке служба запомнит текущие параметры запуска (например, `-port` или `-dir`), поэтому если они нужны, укажите их:*
+    ```powershell
+    .\doc-srv.exe -port 9090 -dir "C:\Docs" -service install
+    ```
+3.  Запустите службу:
+    ```powershell
+    .\doc-srv.exe -service start
+    ```
 
-Пример:
+Для остановки и удаления:
 ```powershell
-.\doc-srv.exe -port 9090 -dir "C:\Data\Docs"
+.\doc-srv.exe -service stop
+.\doc-srv.exe -service uninstall
 ```
 
 ## Структура папок (пример)
