@@ -58,22 +58,41 @@
             for (var i = 0; i < sections.length; i++) {
                 var section = sections[i];
                 var items = section.getElementsByTagName('li');
-                var hasVisible = false;
+                var readme = section.querySelector('.readme');
+                
+                // Check if filter matches section name
+                var summary = section.querySelector('summary');
+                var sectionNameMatch = summary && summary.innerText.toLowerCase().indexOf(filter) > -1;
 
+                // Check if filter matches README content
+                var readmeMatch = false;
+                if (readme) {
+                    var readmeText = readme.innerText || readme.textContent;
+                    if (readmeText.toLowerCase().indexOf(filter) > -1) {
+                        readmeMatch = true;
+                    }
+                }
+
+                var hasVisibleItem = false;
+
+                // Filter individual files
                 for (var j = 0; j < items.length; j++) {
                     var item = items[j];
                     var text = item.innerText || item.textContent;
-                    if (text.toLowerCase().indexOf(filter) > -1) {
+                    // If section matches or readme matches, show all items
+                    // Otherwise check item name
+                    if (sectionNameMatch || readmeMatch || text.toLowerCase().indexOf(filter) > -1) {
                         item.style.display = "";
-                        hasVisible = true;
+                        hasVisibleItem = true;
                     } else {
                         item.style.display = "none";
                     }
                 }
 
-                if (hasVisible) {
+                // Show section if it has visible items OR if the section/readme itself matched
+                // (If section/readme matched, hasVisibleItem is already true because we showed all items)
+                if (hasVisibleItem) {
                     section.style.display = "";
-                    // Automatically expand if searching
                     if (filter.length > 0) {
                         section.open = true;
                     }

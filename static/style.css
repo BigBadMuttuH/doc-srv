@@ -1,11 +1,16 @@
-html, body {
-    height: 100%;
+html {
+    min-height: 100%;
 }
 body {
+    min-height: 100vh;
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     background: radial-gradient(circle at top left, #1fbf8f 0, #007f66 40%, #005243 100%);
+    background-attachment: fixed;
     color: #ffffff;
+}
+*, *::before, *::after {
+    box-sizing: border-box;
 }
 .page {
     max-width: 960px;
@@ -84,8 +89,9 @@ body {
     margin-top: 8px;
 }
 .footer {
-    margin-top: 24px;
-    padding-top: 12px;
+    margin-top: 48px;
+    padding-top: 24px;
+    padding-bottom: 24px;
     border-top: 1px solid rgba(255, 255, 255, 0.25);
     font-size: 13px;
     opacity: 0.85;
