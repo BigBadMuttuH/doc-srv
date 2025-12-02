@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -70,109 +72,183 @@ func (r *DocRepository) GetSections() ([]Section, error) {
 	return sections, nil
 }
 
+// scan выполняет рекурсивный обход каталога документов.
+//
+//  * Файлы .pdf в корне r.dir попадают в секцию "Общее".
+//  * Каждая поддиректория (любого уровня), в которой есть хотя бы один .pdf
+//    или README.md, становится отдельной секцией с именем вида "HR/2025".
+//  * README.md в каждой директории рендерится в HTML, а относительные
+//    ссылки/картинки переписываются на базу "/docs/<relative-dir>/...".
 func (r *DocRepository) scan() ([]Section, error) {
-	entries, err := os.ReadDir(r.dir)
-	if err != nil {
-		return nil, fmt.Errorf("could not read docs directory: %w", err)
+	// Проверим, что корневая директория доступна.
+	if _, err := os.Stat(r.dir); err != nil {
+		return nil, fmt.Errorf("could not stat docs directory: %w", err)
 	}
 
-	var sections []Section
+	var (
+		sections    []Section
+		generalDocs []Document
 
-	// 1. Root level files (General section)
-	var generalDocs []Document
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".pdf") {
-			generalDocs = append(generalDocs, Document{
-				Name: e.Name(),
-				URL:  "/docs/" + e.Name(),
-			})
+		// Ключ - относительный путь директории (с файловыми разделителями),
+		// значение - собираемая секция.
+		sectionsMap = make(map[string]*Section)
+	)
+
+	walkFn := func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			log.Printf("Error accessing %s: %v", path, err)
+			return nil // пропускаем проблемные узлы, но не останавливаем обход
 		}
+
+		// Корневую директорию пропускаем, нас интересуют только файлы/поддиректории.
+		if path == r.dir {
+			return nil
+		}
+
+		rel, err := filepath.Rel(r.dir, path)
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() {
+			// Секцию создадим лениво, когда найдём файлы/README.
+			return nil
+		}
+
+		lowerName := strings.ToLower(d.Name())
+		dirRel := filepath.Dir(rel) // относительный путь директории
+
+		// Файлы в корне r.dir → секция "Общее".
+		if dirRel == "." {
+			if strings.HasSuffix(lowerName, ".pdf") {
+				generalDocs = append(generalDocs, Document{
+					Name: d.Name(),
+					URL:  "/docs/" + d.Name(),
+				})
+			}
+			return nil
+		}
+
+		// Все остальные файлы относятся к некоторой поддиректории.
+		sec, ok := sectionsMap[dirRel]
+		if !ok {
+			sec = &Section{Name: filepath.ToSlash(dirRel)}
+			sectionsMap[dirRel] = sec
+		}
+
+		if strings.HasSuffix(lowerName, ".pdf") {
+			// Собираем URL по относительному пути внутри /docs/.
+			sec.Documents = append(sec.Documents, Document{
+				Name: d.Name(),
+				URL:  "/docs/" + filepath.ToSlash(rel),
+			})
+			return nil
+		}
+
+		if lowerName == "readme.md" {
+			readmeHTML, err := renderReadme(path, filepath.ToSlash(dirRel))
+			if err != nil {
+				log.Printf("Error reading README in %s: %v", dirRel, err)
+				return nil
+			}
+			sec.Readme = readmeHTML
+		}
+
+		return nil
 	}
+
+	if err := filepath.WalkDir(r.dir, walkFn); err != nil {
+		return nil, fmt.Errorf("could not walk docs directory: %w", err)
+	}
+
+	// Собираем итоговый срез секций.
 	if len(generalDocs) > 0 {
+		// Отсортируем документы в "Общее" по имени.
+		sort.Slice(generalDocs, func(i, j int) bool {
+			return strings.ToLower(generalDocs[i].Name) < strings.ToLower(generalDocs[j].Name)
+		})
 		sections = append(sections, Section{Name: "Общее", Documents: generalDocs})
 	}
 
-	// 2. Subdirectories (Named sections)
-	for _, e := range entries {
-		if e.IsDir() {
-			subDirName := e.Name()
-			subDirPath := filepath.Join(r.dir, subDirName)
-			subEntries, err := os.ReadDir(subDirPath)
-			if err != nil {
-				log.Printf("Error reading subdirectory %s: %v", subDirName, err)
-				continue
-			}
+	// Секции из поддиректорий: сортируем по имени секции и по имени документа внутри.
+	keys := make([]string, 0, len(sectionsMap))
+	for k := range sectionsMap {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 
-			var subDocs []Document
-			var readmeContent template.HTML
-
-			for _, subE := range subEntries {
-				if !subE.IsDir() {
-					lowerName := strings.ToLower(subE.Name())
-					if strings.HasSuffix(lowerName, ".pdf") {
-						subDocs = append(subDocs, Document{
-							Name: subE.Name(),
-							URL:  "/docs/" + subDirName + "/" + subE.Name(),
-						})
-					} else if lowerName == "readme.md" {
-						// Read README content
-						content, err := os.ReadFile(filepath.Join(subDirPath, subE.Name()))
-						if err == nil {
-							// Configure goldmark
-							md := goldmark.New()
-							context := parser.NewContext()
-							
-							// Parse
-							reader := text.NewReader(content)
-							doc := md.Parser().Parse(reader, parser.WithContext(context))
-
-							// Transform AST: Rewrite image URLs
-							ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
-								if !entering {
-									return ast.WalkContinue, nil
-								}
-								
-								if img, ok := n.(*ast.Image); ok {
-									dest := string(img.Destination)
-									// If path is relative (not starting with / or http), prepend /docs/<subDir>/
-									if !strings.HasPrefix(dest, "/") && !strings.HasPrefix(dest, "http") {
-										newDest := fmt.Sprintf("/docs/%s/%s", subDirName, dest)
-										img.Destination = []byte(newDest)
-									}
-								}
-								
-								if link, ok := n.(*ast.Link); ok {
-									dest := string(link.Destination)
-									if !strings.HasPrefix(dest, "/") && !strings.HasPrefix(dest, "http") {
-										newDest := fmt.Sprintf("/docs/%s/%s", subDirName, dest)
-										link.Destination = []byte(newDest)
-									}
-								}
-								return ast.WalkContinue, nil
-							})
-
-							// Render
-							var buf bytes.Buffer
-							if err := md.Renderer().Render(&buf, content, doc); err == nil {
-								readmeContent = template.HTML(buf.String())
-							} else {
-								// Fallback
-								readmeContent = template.HTML(template.HTMLEscapeString(string(content)))
-							}
-						}
-					}
-				}
-			}
-
-			if len(subDocs) > 0 || readmeContent != "" {
-				sections = append(sections, Section{
-					Name:      subDirName,
-					Documents: subDocs,
-					Readme:    readmeContent,
-				})
-			}
+	for _, k := range keys {
+		sec := sectionsMap[k]
+		if len(sec.Documents) == 0 && sec.Readme == "" {
+			continue
 		}
+
+		sort.Slice(sec.Documents, func(i, j int) bool {
+			return strings.ToLower(sec.Documents[i].Name) < strings.ToLower(sec.Documents[j].Name)
+		})
+
+		sections = append(sections, *sec)
 	}
 
 	return sections, nil
+}
+
+// renderReadme читает README.md по заданному пути и рендерит его в HTML,
+// переписывая относительные ссылки/картинки на базу "/docs/<relDir>/".
+// relDir - относительный путь директории внутри r.dir, в формате с "/".
+func renderReadme(path string, relDir string) (template.HTML, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+
+	md := goldmark.New()
+	ctx := parser.NewContext()
+
+	reader := text.NewReader(content)
+	doc := md.Parser().Parse(reader, parser.WithContext(ctx))
+
+	basePrefix := "/docs/" + relDir + "/"
+
+	// Проходим по AST и переписываем относительные URL.
+	ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+
+		rewrite := func(dest []byte) []byte {
+			url := string(dest)
+			if isRelativeURL(url) {
+				return []byte(basePrefix + url)
+			}
+			return dest
+		}
+
+		if img, ok := n.(*ast.Image); ok {
+			img.Destination = rewrite(img.Destination)
+		}
+		if link, ok := n.(*ast.Link); ok {
+			link.Destination = rewrite(link.Destination)
+		}
+
+		return ast.WalkContinue, nil
+	})
+
+	var buf bytes.Buffer
+	if err := md.Renderer().Render(&buf, content, doc); err != nil {
+		// Fallback: эскейпнем исходный Markdown как текст, если рендеринг не удался.
+		return template.HTML(template.HTMLEscapeString(string(content))), nil
+	}
+
+	return template.HTML(buf.String()), nil
+}
+
+// isRelativeURL возвращает true, если URL выглядит как относительный путь
+// внутри README (не начинается с '/' или http/https).
+func isRelativeURL(u string) bool {
+	lower := strings.ToLower(u)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		return false
+	}
+	return !strings.HasPrefix(lower, "/")
 }

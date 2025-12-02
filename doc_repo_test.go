@@ -36,6 +36,22 @@ func TestDocRepository_Scan(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Create nested subdir HR/2025
+	yearDir := filepath.Join(subDir, "2025")
+	if err := os.Mkdir(yearDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create PDF in nested subdir
+	if err := os.WriteFile(filepath.Join(yearDir, "plan.pdf"), []byte("pdf content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create README.md in nested subdir
+	if err := os.WriteFile(filepath.Join(yearDir, "README.md"), []byte("# HR 2025"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
 	// Initialize Repo
 	repo := NewDocRepository(tmpDir, time.Minute)
 
@@ -46,14 +62,15 @@ func TestDocRepository_Scan(t *testing.T) {
 	}
 
 	// Verify
-	// We expect 2 sections: "Общее" (root) and "HR"
-	if len(sections) != 2 {
-		t.Errorf("expected 2 sections, got %d", len(sections))
+	// We expect 3 sections: "Общее" (root), "HR" и "HR/2025"
+	if len(sections) != 3 {
+		t.Errorf("expected 3 sections, got %d", len(sections))
 	}
 
-	// Check Root section
+	// Check sections
 	foundGeneral := false
 	foundHR := false
+	foundHR2025 := false
 
 	for _, s := range sections {
 		switch s.Name {
@@ -75,7 +92,18 @@ func TestDocRepository_Scan(t *testing.T) {
 			}
 			// Check Readme presence
 			if s.Readme == "" {
-				t.Error("expected Readme content, got empty")
+				t.Error("expected Readme content in HR, got empty")
+			}
+		case "HR/2025":
+			foundHR2025 = true
+			if len(s.Documents) != 1 {
+				t.Errorf("expected 1 document in HR/2025, got %d", len(s.Documents))
+			}
+			if s.Documents[0].Name != "plan.pdf" {
+				t.Errorf("expected plan.pdf, got %s", s.Documents[0].Name)
+			}
+			if s.Readme == "" {
+				t.Error("expected Readme content in HR/2025, got empty")
 			}
 		}
 	}
@@ -85,5 +113,8 @@ func TestDocRepository_Scan(t *testing.T) {
 	}
 	if !foundHR {
 		t.Error("HR section not found")
+	}
+	if !foundHR2025 {
+		t.Error("HR/2025 section not found")
 	}
 }
