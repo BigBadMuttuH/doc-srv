@@ -6,6 +6,7 @@ import (
 	"flag"
 	"html/template"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -63,7 +64,7 @@ func (p *program) Start(s service.Service) error {
 	mux := http.NewServeMux()
 
 	// Handler - List
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	indexHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
@@ -81,23 +82,21 @@ func (p *program) Start(s service.Service) error {
 			log.Printf("Error executing template: %v", err)
 			return
 		}
-
-		if accessLog != nil {
-			accessLog.Printf("INDEX remote=%s ua=%q", r.RemoteAddr, r.UserAgent())
-		}
 	})
+	mux.Handle("/", indexHandler)
 
 	// Handler - Static (CSS)
 	staticServer := http.FileServer(http.FS(content))
 	mux.Handle("/static/", staticServer)
 
-	// Handler - Serve documents with logging
+	// Handler - Serve documents
 	docFS := http.FileServer(http.Dir(p.docsDir))
-	mux.Handle("/docs/", http.StripPrefix("/docs/", loggingMiddleware(docFS)))
+	mux.Handle("/docs/", http.StripPrefix("/docs/", docFS))
 
+	// Wrap mux with access logging middleware so that все запросы логируются единообразно.
 	p.server = &http.Server{
 		Addr:    ":" + p.port,
-		Handler: mux,
+		Handler: loggingMiddleware(mux),
 	}
 
 	// Start Server in goroutine
@@ -168,11 +167,55 @@ func main() {
 	}
 }
 
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	status int
+	bytes  int
+}
+
+func (lrw *loggingResponseWriter) WriteHeader(statusCode int) {
+	lrw.status = statusCode
+	lrw.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (lrw *loggingResponseWriter) Write(p []byte) (int, error) {
+	if lrw.status == 0 {
+		// Если явно не вызывали WriteHeader, считаем статус 200.
+		lrw.status = http.StatusOK
+	}
+	n, err := lrw.ResponseWriter.Write(p)
+	lrw.bytes += n
+	return n, err
+}
+
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		lrw := &loggingResponseWriter{ResponseWriter: w}
+		next.ServeHTTP(lrw, r)
+
 		if accessLog != nil {
-			accessLog.Printf("DOC remote=%s method=%s path=%s", r.RemoteAddr, r.Method, r.URL.Path)
+			duration := time.Since(start)
+
+			remote := r.RemoteAddr
+			if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+				remote = host
+			}
+
+			// Формат, близкий к nginx combined log (без времени, его пишет log.Logger):
+			// $remote_addr - - "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" $request_time
+			accessLog.Printf("%s - - \"%s %s %s\" %d %d \"%s\" \"%s\" %.3f",
+				remote,
+				r.Method,
+				r.URL.RequestURI(),
+				r.Proto,
+				lrw.status,
+				lrw.bytes,
+				r.Referer(),
+				r.UserAgent(),
+				duration.Seconds(),
+			)
 		}
-		next.ServeHTTP(w, r)
 	})
 }
