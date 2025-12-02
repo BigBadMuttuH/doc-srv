@@ -21,6 +21,12 @@ var content embed.FS
 
 var accessLog *log.Logger
 
+const (
+	exitCodeConfig         = 1
+	exitCodeServiceControl = 2
+	exitCodeRun            = 3
+)
+
 // Program structures.
 // Define Start and Stop methods.
 type program struct {
@@ -156,21 +162,23 @@ func main() {
 
 	s, err := service.New(prg, svcConfig)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("failed to create service: %v", err)
+		os.Exit(exitCodeConfig)
 	}
 
 	// Handle service controls
 	if *svcFlag != "" {
-		err = service.Control(s, *svcFlag)
-		if err != nil {
-			log.Fatalf("Valid actions: %q\nError: %s", service.ControlAction, err)
+		if err := service.Control(s, *svcFlag); err != nil {
+			log.Printf("Valid actions: %q\nError: %s", service.ControlAction, err)
+			os.Exit(exitCodeServiceControl)
 		}
 		return
 	}
 
 	// Run
 	if err = s.Run(); err != nil {
-		log.Fatal(err)
+		log.Printf("service run failed: %v", err)
+		os.Exit(exitCodeRun)
 	}
 }
 
