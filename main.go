@@ -96,6 +96,9 @@ func (p *program) Start(s service.Service) error {
 	staticServer := http.FileServer(http.FS(content))
 	mux.Handle("/static/", staticServer)
 
+	// Health check endpoint
+	mux.Handle("/healthz", healthHandler(p.cfg.DocsDir))
+
 	// Handler - Serve documents
 	docFS := http.FileServer(http.Dir(p.cfg.DocsDir))
 	mux.Handle("/docs/", http.StripPrefix("/docs/", docFS))
@@ -213,6 +216,20 @@ type loggingResponseWriter struct {
 	bytes  int
 }
 
+// healthHandler проверяет доступность каталога документов и возвращает 200 OK,
+// если всё в порядке. Используется для простого мониторинга сервиса.
+func healthHandler(docsDir string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := os.Stat(docsDir); err != nil {
+			http.Error(w, "docs directory is not accessible", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("ok"))
+	})
+}
+
 func (lrw *loggingResponseWriter) WriteHeader(statusCode int) {
 	lrw.status = statusCode
 	lrw.ResponseWriter.WriteHeader(statusCode)
@@ -236,6 +253,12 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(lrw, r)
 
 		if accessLog != nil {
+			// /healthz обычно дергается очень часто мониторингом, поэтому
+			// по умолчанию не логируем его, чтобы не засорять access.log.
+			if r.URL.Path == "/healthz" {
+				return
+			}
+
 			duration := time.Since(start)
 
 			remote := r.RemoteAddr
