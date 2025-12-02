@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"flag"
+	"fmt"
 	"html/template"
 	"log"
 	"net"
@@ -57,7 +58,7 @@ func (p *program) Start(s service.Service) error {
 	// Parse Template
 	tmpl, err := template.ParseFS(content, "templates/index.html")
 	if err != nil {
-		log.Fatalf("Failed to parse template: %v", err)
+		return fmt.Errorf("failed to parse template: %w", err)
 	}
 
 	// Handlers
@@ -120,8 +121,10 @@ func (p *program) Stop(s service.Service) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := p.server.Shutdown(ctx); err != nil {
-		log.Printf("Server forced to shutdown: %v", err)
+	if p.server != nil {
+		if err := p.server.Shutdown(ctx); err != nil {
+			log.Printf("Server forced to shutdown: %v", err)
+		}
 	}
 
 	if p.rotWriter != nil {
