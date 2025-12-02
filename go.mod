@@ -7,4 +7,7 @@ require (
 	github.com/yuin/goldmark v1.7.13
 )
 
-require golang.org/x/sys v0.34.0 // indirect
+require (
+	golang.org/x/sys v0.34.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+)

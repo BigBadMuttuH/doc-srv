@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -28,6 +29,13 @@ func newRotatingWriter(filename string, maxSize int64) (*rotatingWriter, error) 
 
 // open must be called under lock or before server start
 func (rw *rotatingWriter) open() error {
+	// Ensure directory for the log file exists (for paths like ./log/access.log).
+	if dir := filepath.Dir(rw.filename); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("create log directory %q: %w", dir, err)
+		}
+	}
+
 	f, err := os.OpenFile(rw.filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return err

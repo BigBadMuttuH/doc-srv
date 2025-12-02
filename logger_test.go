@@ -43,12 +43,12 @@ func TestRotatingWriter(t *testing.T) {
 	// Check if rotated file exists
 	// We can't easily predict the rotated filename timestamp.
 	// But we can check if the current file is small (just 10 bytes from 3rd write).
-	
+
 	info, err := os.Stat(filename)
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	if info.Size() != 10 {
 		t.Errorf("expected current file size 10, got %d", info.Size())
 	}

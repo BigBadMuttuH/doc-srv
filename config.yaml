@@ -1,0 +1,21 @@
+# Sample configuration for doc-srv
+# All fields are optional; if omitted, built-in defaults are used.
+
+# Directory with documentation tree
+docs_dir: "./docs"
+
+# TCP port to listen on
+port: "8080"
+
+# How long to cache the scanned documents tree in memory.
+# Accepts Go duration strings, e.g. "30s", "5m", "1h".
+cache_ttl: "5m"
+
+# HTTP server timeouts
+read_timeout: "15s"
+write_timeout: "15s"
+idle_timeout: "60s"
+read_header_timeout: "5s"
+
+# Access log file name (relative to working directory)
+log_file: "access.log"

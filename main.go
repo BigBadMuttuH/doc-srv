@@ -30,9 +30,9 @@ const (
 // Program structures.
 // Define Start and Stop methods.
 type program struct {
-	server    *http.Server
-	port      string
-	docsDir   string
+	server *http.Server
+	cfg    Config
+
 	rotWriter *rotatingWriter
 }
 
@@ -52,14 +52,14 @@ func (p *program) Start(s service.Service) error {
 
 	// Initialize Logging
 	var err error
-	p.rotWriter, err = newRotatingWriter("access.log", maxLogSizeBytes)
+	p.rotWriter, err = newRotatingWriter(p.cfg.LogFile, maxLogSizeBytes)
 	if err != nil {
 		return err
 	}
 	accessLog = log.New(p.rotWriter, "", log.LstdFlags)
 
 	// Doc Repository
-	repo := NewDocRepository(p.docsDir, 5*time.Minute)
+	repo := NewDocRepository(p.cfg.DocsDir, p.cfg.CacheTTL)
 
 	// Parse Template
 	tmpl, err := template.ParseFS(content, "templates/index.html")
@@ -97,23 +97,23 @@ func (p *program) Start(s service.Service) error {
 	mux.Handle("/static/", staticServer)
 
 	// Handler - Serve documents
-	docFS := http.FileServer(http.Dir(p.docsDir))
+	docFS := http.FileServer(http.Dir(p.cfg.DocsDir))
 	mux.Handle("/docs/", http.StripPrefix("/docs/", docFS))
 
 	// Wrap mux with access logging middleware so that все запросы логируются единообразно.
-	// HTTP server with sane defaults for timeouts to protect от висящих соединений.
 	p.server = &http.Server{
-		Addr:         ":" + p.port,
-		Handler:      loggingMiddleware(mux),
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second, ReadHeaderTimeout: 5 * time.Second,
+		Addr:              ":" + p.cfg.Port,
+		Handler:           loggingMiddleware(mux),
+		ReadTimeout:       p.cfg.ReadTimeout,
+		WriteTimeout:      p.cfg.WriteTimeout,
+		IdleTimeout:       p.cfg.IdleTimeout,
+		ReadHeaderTimeout: p.cfg.ReadHeaderTimeout,
 	}
 
 	// Start Server in goroutine
 	go func() {
-		log.Printf("Server starting on http://localhost:%s", p.port)
-		log.Printf("Serving documents from %s", p.docsDir)
+		log.Printf("Server starting on http://localhost:%s", p.cfg.Port)
+		log.Printf("Serving documents from %s", p.cfg.DocsDir)
 		if err := p.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("Listen error: %v", err)
 		}
@@ -142,22 +142,47 @@ func (p *program) Stop(s service.Service) error {
 }
 
 func main() {
-	// Config
-	docsDir := flag.String("dir", "./docs", "Directory containing PDF files")
-	port := flag.String("port", "8080", "Server port")
+	// Flags
+	configPath := flag.String("config", "config.yaml", "Path to config file")
+	docsDirOverride := flag.String("dir", "", "Directory containing PDF files (overrides config)")
+	portOverride := flag.String("port", "", "Server port (overrides config)")
 	svcFlag := flag.String("service", "", "Control the system service: install, uninstall, start, stop")
 	flag.Parse()
+
+	// Load config (defaults + optional YAML file).
+	cfg, err := LoadConfig(*configPath)
+	if err != nil {
+		log.Printf("failed to load config: %v", err)
+		os.Exit(exitCodeConfig)
+	}
+
+	// Apply CLI overrides on top of config.
+	if *docsDirOverride != "" {
+		cfg.DocsDir = *docsDirOverride
+	}
+	if *portOverride != "" {
+		cfg.Port = *portOverride
+	}
+
+	// Service configuration uses the same flags that were passed on install,
+	// so SCM will restart the service with identical arguments.
+	args := []string{"-config", *configPath}
+	if *portOverride != "" {
+		args = append(args, "-port", *portOverride)
+	}
+	if *docsDirOverride != "" {
+		args = append(args, "-dir", *docsDirOverride)
+	}
 
 	svcConfig := &service.Config{
 		Name:        "DocSrv",
 		DisplayName: "Corporate Doc Server",
 		Description: "HTTP server for serving PDF documents.",
-		Arguments:   []string{"-port", *port, "-dir", *docsDir},
+		Arguments:   args,
 	}
 
 	prg := &program{
-		port:    *port,
-		docsDir: *docsDir,
+		cfg: cfg,
 	}
 
 	s, err := service.New(prg, svcConfig)
