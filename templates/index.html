@@ -50,32 +50,93 @@
     </div>
 
     <script>
+        // Normalize text for search: lower-case + ё -> е
+        function normalizeText(str) {
+            return (str || "").toLowerCase().replace(/ё/g, "е");
+        }
+
+        // Parse raw search string and extract optional operator.
+        // Supported operators: sec:, doc:, readme:
+        function parseSearch(raw) {
+            var result = { mode: "all", term: "" };
+            if (!raw) {
+                return result;
+            }
+
+            var trimmed = raw.trim();
+            var lower = trimmed.toLowerCase();
+
+            if (lower.indexOf("sec:") === 0) {
+                result.mode = "sec";
+                result.term = trimmed.slice(4).trim();
+            } else if (lower.indexOf("doc:") === 0) {
+                result.mode = "doc";
+                result.term = trimmed.slice(4).trim();
+            } else if (lower.indexOf("readme:") === 0) {
+                result.mode = "readme";
+                result.term = trimmed.slice(7).trim();
+            } else {
+                result.term = trimmed;
+            }
+
+            return result;
+        }
+
+        function updateSearchInUrl(value) {
+            if (!window.history || !window.history.replaceState) return;
+            var url = new URL(window.location.href);
+            if (value && value.length > 0) {
+                url.searchParams.set("q", value);
+            } else {
+                url.searchParams.delete("q");
+            }
+            window.history.replaceState(null, "", url.toString());
+        }
+
         function filterDocs() {
             var input = document.getElementById('searchInput');
-            var filter = input.value.toLowerCase();
+            var raw = input.value || "";
+
+            // Keep query in URL so состояние поиска можно шарить ссылкой.
+            updateSearchInUrl(raw);
+
+            var parsed = parseSearch(raw);
+            var term = parsed.term;
+            var termLower = term.toLowerCase();
+            var normalizedTerm = normalizeText(term);
+
             var sections = document.getElementsByTagName('details');
 
             for (var i = 0; i < sections.length; i++) {
                 var section = sections[i];
                 var items = section.getElementsByTagName('li');
                 var readme = section.querySelector('.readme');
-                
+
                 // Reset highlight
                 if (readme) {
                     removeHighlight(readme);
                 }
+                for (var jReset = 0; jReset < items.length; jReset++) {
+                    removeHighlight(items[jReset]);
+                }
 
-                // Check if filter matches section name
                 var summary = section.querySelector('summary');
-                var sectionNameMatch = summary && summary.innerText.toLowerCase().indexOf(filter) > -1;
+                var sectionNameMatch = false;
+
+                if (summary && normalizedTerm.length > 0 && (parsed.mode === "all" || parsed.mode === "sec")) {
+                    var sectionText = summary.innerText || summary.textContent || "";
+                    sectionNameMatch = normalizeText(sectionText).indexOf(normalizedTerm) > -1;
+                }
 
                 // Check if filter matches README content and highlight
                 var readmeMatch = false;
-                if (readme && filter.length > 0) {
-                    var text = readme.innerText || readme.textContent;
-                    if (text.toLowerCase().indexOf(filter) > -1) {
+                if (readme && normalizedTerm.length > 0 && (parsed.mode === "all" || parsed.mode === "readme")) {
+                    var readmeText = readme.innerText || readme.textContent || "";
+                    if (normalizeText(readmeText).indexOf(normalizedTerm) > -1) {
                         readmeMatch = true;
-                        highlightText(readme, filter);
+                        if (termLower.length > 0) {
+                            highlightText(readme, termLower);
+                        }
                     }
                 }
 
@@ -84,29 +145,38 @@
                 // Filter individual files
                 for (var j = 0; j < items.length; j++) {
                     var item = items[j];
-                    var text = item.innerText || item.textContent;
-                    // If section matches or readme matches, show all items
-                    // Otherwise check item name
-                    if (sectionNameMatch || readmeMatch || text.toLowerCase().indexOf(filter) > -1) {
+                    var text = item.innerText || item.textContent || "";
+
+                    var itemMatches = false;
+                    if (normalizedTerm.length > 0 && (parsed.mode === "all" || parsed.mode === "doc")) {
+                        itemMatches = normalizeText(text).indexOf(normalizedTerm) > -1;
+                    }
+
+                    // If section matches or readme matches, show all items.
+                    // Otherwise check item name.
+                    if (sectionNameMatch || readmeMatch || itemMatches || normalizedTerm.length === 0) {
                         item.style.display = "";
                         hasVisibleItem = true;
+                        if (itemMatches && termLower.length > 0) {
+                            highlightText(item, termLower);
+                        }
                     } else {
                         item.style.display = "none";
                     }
                 }
 
                 // Show section if it has visible items OR if the section/readme itself matched
-                if (hasVisibleItem || (filter.length > 0 && (sectionNameMatch || readmeMatch))) {
+                if (hasVisibleItem || (normalizedTerm.length > 0 && (sectionNameMatch || readmeMatch))) {
                     section.style.display = "";
-                    if (filter.length > 0) {
+                    if (normalizedTerm.length > 0) {
                         section.open = true;
                         // Scroll to first match in readme if it matched
                         if (readmeMatch) {
-                             var firstHighlight = readme.querySelector('.highlight');
-                             if (firstHighlight) {
-                                 // smooth scroll to it
-                                 firstHighlight.scrollIntoView({behavior: "smooth", block: "center"});
-                             }
+                            var firstHighlight = readme.querySelector('.highlight');
+                            if (firstHighlight) {
+                                // smooth scroll to it
+                                firstHighlight.scrollIntoView({behavior: "smooth", block: "center"});
+                            }
                         }
                     }
                 } else {
@@ -116,6 +186,9 @@
         }
 
         function highlightText(element, text) {
+            if (text.length === 0) return;
+            var innerHTML = element.innerHTML;
+            var index = innerHTML.toLowerCase().indexOf(text);
             if (text.length === 0) return;
             var innerHTML = element.innerHTML;
             var index = innerHTML.toLowerCase().indexOf(text);
@@ -182,6 +255,24 @@
                 }
             }
         }
+    </script>
+    <script>
+        // Apply saved search from URL on initial load
+        document.addEventListener('DOMContentLoaded', function () {
+            var input = document.getElementById('searchInput');
+            if (!input) return;
+
+            try {
+                var url = new URL(window.location.href);
+                var q = url.searchParams.get('q');
+                if (q) {
+                    input.value = q;
+                    filterDocs();
+                }
+            } catch (e) {
+                // ignore URL parsing errors
+            }
+        });
     </script>
 </body>
 </html>

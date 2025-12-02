@@ -18,4 +18,4 @@ idle_timeout: "60s"
 read_header_timeout: "5s"
 
 # Access log file name (relative to working directory)
-log_file: "access.log"
+log_file: "./log/access.log"
