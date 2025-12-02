@@ -94,9 +94,13 @@ func (p *program) Start(s service.Service) error {
 	mux.Handle("/docs/", http.StripPrefix("/docs/", docFS))
 
 	// Wrap mux with access logging middleware so that все запросы логируются единообразно.
+	// HTTP server with sane defaults for timeouts to protect от висящих соединений.
 	p.server = &http.Server{
-		Addr:    ":" + p.port,
-		Handler: loggingMiddleware(mux),
+		Addr:         ":" + p.port,
+		Handler:      loggingMiddleware(mux),
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second, ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	// Start Server in goroutine
