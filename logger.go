@@ -61,6 +61,10 @@ func (rw *rotatingWriter) rotate() error {
 	timestamp := time.Now().Format("20060102-150405")
 	rotated := fmt.Sprintf("%s.%s", rw.filename, timestamp)
 	if err := os.Rename(rw.filename, rotated); err != nil {
+		// Try to reopen original file so we can keep logging even if rotation fails.
+		if openErr := rw.open(); openErr != nil {
+			return fmt.Errorf("failed to rename log file: %w (reopen failed: %v)", err, openErr)
+		}
 		return fmt.Errorf("failed to rename log file: %w", err)
 	}
 
@@ -83,6 +87,15 @@ func (rw *rotatingWriter) Write(p []byte) (int, error) {
 			// or fallback to stderr if completely broken.
 			// For now, just log to stderr that rotation failed
 			fmt.Fprintf(os.Stderr, "log rotation failed: %v\n", err)
+		}
+	}
+
+	// If rotate() failed to reopen the file, try once more before giving up.
+	if rw.file == nil {
+		if err := rw.open(); err != nil {
+			// Last resort: write to stderr.
+			fmt.Fprintf(os.Stderr, "log writer unusable, writing to stderr: %v\n", err)
+			return os.Stderr.Write(p)
 		}
 	}
 
