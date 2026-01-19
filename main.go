@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/kardianos/service"
@@ -19,7 +20,10 @@ import (
 //go:embed templates/index.html static/*
 var content embed.FS
 
-var accessLog *log.Logger
+var (
+	accessLog *log.Logger
+	accessLogMu sync.RWMutex
+)
 
 const (
 	exitCodeConfig         = 1
@@ -56,7 +60,9 @@ func (p *program) Start(s service.Service) error {
 	if err != nil {
 		return err
 	}
+	accessLogMu.Lock()
 	accessLog = log.New(p.rotWriter, "", log.LstdFlags)
+	accessLogMu.Unlock()
 
 	// Doc Repository
 	repo := NewDocRepository(p.cfg.DocsDir, p.cfg.CacheTTL)
@@ -87,6 +93,7 @@ func (p *program) Start(s service.Service) error {
 		w.Header().Set("Content-Type", "text/html")
 		if err := tmpl.Execute(w, sections); err != nil {
 			log.Printf("Error executing template: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
 	})
@@ -252,13 +259,17 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		lrw := &loggingResponseWriter{ResponseWriter: w}
 		next.ServeHTTP(lrw, r)
 
-		if accessLog != nil {
-			// /healthz обычно дергается очень часто мониторингом, поэтому
-			// по умолчанию не логируем его, чтобы не засорять access.log.
-			if r.URL.Path == "/healthz" {
-				return
-			}
+		// /healthz обычно дергается очень часто мониторингом, поэтому
+		// по умолчанию не логируем его, чтобы не засорять access.log.
+		if r.URL.Path == "/healthz" {
+			return
+		}
 
+		accessLogMu.RLock()
+		logger := accessLog
+		accessLogMu.RUnlock()
+
+		if logger != nil {
 			duration := time.Since(start)
 
 			remote := r.RemoteAddr
@@ -268,7 +279,7 @@ func loggingMiddleware(next http.Handler) http.Handler {
 
 			// Формат, близкий к nginx combined log (без времени, его пишет log.Logger):
 			// $remote_addr - - "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" $request_time
-			accessLog.Printf("%s - - \"%s %s %s\" %d %d \"%s\" \"%s\" %.3f",
+			logger.Printf("%s - - \"%s %s %s\" %d %d \"%s\" \"%s\" %.3f",
 				remote,
 				r.Method,
 				r.URL.RequestURI(),

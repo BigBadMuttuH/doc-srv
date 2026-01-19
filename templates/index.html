@@ -33,7 +33,7 @@
 
                     <ul>
                         {{range .Documents}}
-                        <li><a href="{{.URL}}" target="_blank">📄 {{.Name}}</a></li>
+                        <li><a href="{{.URL}}" target="_blank" rel="noopener noreferrer">📄 {{.Name}}</a></li>
                         {{end}}
                     </ul>
                 </details>
@@ -186,9 +186,6 @@
         }
 
         function highlightText(element, text) {
-            if (text.length === 0) return;
-            var innerHTML = element.innerHTML;
-            var index = innerHTML.toLowerCase().indexOf(text);
             if (text.length === 0) return;
             var innerHTML = element.innerHTML;
             var index = innerHTML.toLowerCase().indexOf(text);
