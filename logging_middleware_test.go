@@ -11,6 +11,10 @@ import (
 
 // Test that loggingMiddleware logs regular requests and captures status/bytes.
 func TestLoggingMiddleware_LogsRequest(t *testing.T) {
+	// Save and restore global accessLog to avoid data races with parallel tests.
+	oldLog := accessLog
+	defer func() { accessLog = oldLog }()
+
 	// Prepare a simple handler that writes a known body and status.
 	baseHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
@@ -51,6 +55,9 @@ func TestLoggingMiddleware_LogsRequest(t *testing.T) {
 
 // Test that loggingMiddleware does not log /healthz requests.
 func TestLoggingMiddleware_SkipsHealthz(t *testing.T) {
+	oldLog := accessLog
+	defer func() { accessLog = oldLog }()
+
 	baseHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
