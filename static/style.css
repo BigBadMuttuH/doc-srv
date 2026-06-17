@@ -186,6 +186,30 @@ summary h2 {
     height: auto;
     border-radius: 4px;
 }
+.readme table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 14px;
+    line-height: 1.5;
+}
+.readme th, .readme td {
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    padding: 8px 12px;
+    text-align: left;
+    vertical-align: top;
+}
+.readme th {
+    background-color: rgba(0, 0, 0, 0.25);
+    font-weight: 600;
+    color: #ffd86b;
+}
+.readme td {
+    background-color: rgba(0, 0, 0, 0.1);
+}
+.readme tr:nth-child(even) td {
+    background-color: rgba(0, 0, 0, 0.15);
+}
 .highlight {
     background-color: #ffd86b;
     color: #000;

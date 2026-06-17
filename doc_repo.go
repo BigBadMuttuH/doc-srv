@@ -16,6 +16,7 @@ import (
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
 )
@@ -203,7 +204,11 @@ func renderReadme(path string, relDir string) (template.HTML, error) {
 		return "", err
 	}
 
-	md := goldmark.New()
+	md := goldmark.New(
+		goldmark.WithExtensions(
+			extension.Table,
+		),
+	)
 	ctx := parser.NewContext()
 
 	reader := text.NewReader(content)
