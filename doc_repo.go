@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/microcosm-cc/bluemonday"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/parser"
@@ -240,7 +241,10 @@ func renderReadme(path string, relDir string) (template.HTML, error) {
 		return template.HTML(template.HTMLEscapeString(string(content))), nil
 	}
 
-	return template.HTML(buf.String()), nil
+	// Санитизируем HTML, чтобы не допустить XSS через README.md.
+	raw := buf.String()
+	clean := bluemonday.UGCPolicy().Sanitize(raw)
+	return template.HTML(clean), nil
 }
 
 // isRelativeURL возвращает true, если URL выглядит как относительный путь
