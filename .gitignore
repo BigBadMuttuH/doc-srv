@@ -18,3 +18,4 @@ vendor/
 *.bak
 docs
 doc-srv
+/.omo/run-continuation
