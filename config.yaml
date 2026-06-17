@@ -5,7 +5,7 @@
 docs_dir: "./docs"
 
 # TCP port to listen on
-port: "8080"
+port: "8888"
 
 # How long to cache the scanned documents tree in memory.
 # Accepts Go duration strings, e.g. "30s", "5m", "1h".
@@ -16,6 +16,9 @@ read_timeout: "15s"
 write_timeout: "15s"
 idle_timeout: "60s"
 read_header_timeout: "5s"
+
+# Organization name displayed in the page header
+org_name: "Мурманская таможня"
 
 # Access log file name (relative to working directory)
 log_file: "./log/access.log"

@@ -7,11 +7,9 @@ import (
 	"fmt"
 	"html/template"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/kardianos/service"
@@ -19,11 +17,6 @@ import (
 
 //go:embed templates/index.html static/*
 var content embed.FS
-
-var (
-	accessLog *log.Logger
-	accessLogMu sync.RWMutex
-)
 
 const (
 	exitCodeConfig         = 1
@@ -34,10 +27,13 @@ const (
 // Program structures.
 // Define Start and Stop methods.
 type program struct {
-	server *http.Server
-	cfg    Config
-
+	server   *http.Server
+	cfg      Config
 	rotWriter *rotatingWriter
+
+	configPath    string // путь к config.yaml (для перезагрузки после chdir)
+	portOverride  string // CLI-флаг -port (сохраняем, чтобы не затёрся перезагрузкой)
+	dirOverride   string // CLI-флаг -dir (сохраняем, чтобы не затёрся перезагрузкой)
 }
 
 func (p *program) Start(s service.Service) error {
@@ -52,6 +48,21 @@ func (p *program) Start(s service.Service) error {
 				log.Printf("Failed to change directory: %v", err)
 			}
 		}
+
+		// Перезагружаем конфиг: main() грузил его до смены рабочей директории,
+		// поэтому config.yaml мог не найтись (CWD = System32, а не папка exe).
+		if cfg, err := LoadConfig(p.configPath); err == nil {
+			p.cfg = cfg
+			// CLI-переопределения (port, dir) поверх файла конфига.
+			if p.portOverride != "" {
+				p.cfg.Port = p.portOverride
+			}
+			if p.dirOverride != "" {
+				p.cfg.DocsDir = p.dirOverride
+			}
+		} else {
+			log.Printf("Warning: failed to reload config after chdir: %v", err)
+		}
 	}
 
 	// Initialize Logging
@@ -60,9 +71,7 @@ func (p *program) Start(s service.Service) error {
 	if err != nil {
 		return err
 	}
-	accessLogMu.Lock()
-	accessLog = log.New(p.rotWriter, "", log.LstdFlags)
-	accessLogMu.Unlock()
+	setAccessLog(log.New(p.rotWriter, "", log.LstdFlags))
 
 	// Doc Repository
 	repo := NewDocRepository(p.cfg.DocsDir, p.cfg.CacheTTL)
@@ -91,7 +100,7 @@ func (p *program) Start(s service.Service) error {
 		}
 
 		w.Header().Set("Content-Type", "text/html")
-		if err := tmpl.Execute(w, sections); err != nil {
+		if err := tmpl.Execute(w, pageData{Sections: sections, OrgName: p.cfg.OrgName}); err != nil {
 			log.Printf("Error executing template: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
@@ -110,10 +119,10 @@ func (p *program) Start(s service.Service) error {
 	docFS := http.FileServer(http.Dir(p.cfg.DocsDir))
 	mux.Handle("/docs/", http.StripPrefix("/docs/", docFS))
 
-	// Wrap mux with access logging middleware so that все запросы логируются единообразно.
+	// Wrap mux with recovery + access logging middleware.
 	p.server = &http.Server{
 		Addr:              ":" + p.cfg.Port,
-		Handler:           loggingMiddleware(mux),
+		Handler:           loggingMiddleware(recoveryMiddleware(mux)),
 		ReadTimeout:       p.cfg.ReadTimeout,
 		WriteTimeout:      p.cfg.WriteTimeout,
 		IdleTimeout:       p.cfg.IdleTimeout,
@@ -192,7 +201,10 @@ func main() {
 	}
 
 	prg := &program{
-		cfg: cfg,
+		cfg:          cfg,
+		configPath:   *configPath,
+		portOverride: *portOverride,
+		dirOverride:  *docsDirOverride,
 	}
 
 	s, err := service.New(prg, svcConfig)
@@ -217,79 +229,10 @@ func main() {
 	}
 }
 
-type loggingResponseWriter struct {
-	http.ResponseWriter
-	status int
-	bytes  int
+// pageData передаётся в HTML-шаблон главной страницы.
+type pageData struct {
+	Sections []Section
+	OrgName  string
 }
 
-// healthHandler проверяет доступность каталога документов и возвращает 200 OK,
-// если всё в порядке. Используется для простого мониторинга сервиса.
-func healthHandler(docsDir string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := os.Stat(docsDir); err != nil {
-			http.Error(w, "docs directory is not accessible", http.StatusInternalServerError)
-			return
-		}
 
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = w.Write([]byte("ok"))
-	})
-}
-
-func (lrw *loggingResponseWriter) WriteHeader(statusCode int) {
-	lrw.status = statusCode
-	lrw.ResponseWriter.WriteHeader(statusCode)
-}
-
-func (lrw *loggingResponseWriter) Write(p []byte) (int, error) {
-	if lrw.status == 0 {
-		// Если явно не вызывали WriteHeader, считаем статус 200.
-		lrw.status = http.StatusOK
-	}
-	n, err := lrw.ResponseWriter.Write(p)
-	lrw.bytes += n
-	return n, err
-}
-
-func loggingMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-
-		lrw := &loggingResponseWriter{ResponseWriter: w}
-		next.ServeHTTP(lrw, r)
-
-		// /healthz обычно дергается очень часто мониторингом, поэтому
-		// по умолчанию не логируем его, чтобы не засорять access.log.
-		if r.URL.Path == "/healthz" {
-			return
-		}
-
-		accessLogMu.RLock()
-		logger := accessLog
-		accessLogMu.RUnlock()
-
-		if logger != nil {
-			duration := time.Since(start)
-
-			remote := r.RemoteAddr
-			if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-				remote = host
-			}
-
-			// Формат, близкий к nginx combined log (без времени, его пишет log.Logger):
-			// $remote_addr - - "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" $request_time
-			logger.Printf("%s - - \"%s %s %s\" %d %d \"%s\" \"%s\" %.3f",
-				remote,
-				r.Method,
-				r.URL.RequestURI(),
-				r.Proto,
-				lrw.status,
-				lrw.bytes,
-				r.Referer(),
-				r.UserAgent(),
-				duration.Seconds(),
-			)
-		}
-	})
-}

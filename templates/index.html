@@ -8,7 +8,7 @@
 <body>
     <div class="page">
         <header class="hero">
-            <div class="hero-badge">Мурманская таможня</div>
+            <div class="hero-badge">{{.OrgName}}</div>
             <h1 class="hero-title">Перечень нормативных и иных правовых актов по направлениям деятельности подразделений таможни</h1>
             <p class="hero-subtitle">Для обязательного ознакомления вновь принятых должностных лиц и актуализации знаний действующего состава</p>
         </header>
@@ -23,7 +23,7 @@
             </div>
 
             <div class="sections">
-            {{range .}}
+            {{range .Sections}}
                 <details>
                     <summary><h2>{{.Name}} ({{len .Documents}})</h2></summary>
 
@@ -44,8 +44,8 @@
         </div>
 
         <footer class="footer">
-            <span>©Мурманска таможня · Внутренняя справочная система</span>
-            <span>Разделов: {{len .}}</span>
+            <span>{{.OrgName}} · Внутренняя справочная система</span>
+            <span>Разделов: {{len .Sections}}</span>
         </footer>
     </div>
 

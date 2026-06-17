@@ -18,6 +18,7 @@ type Config struct {
 	IdleTimeout       time.Duration
 	ReadHeaderTimeout time.Duration
 	LogFile           string
+	OrgName           string
 }
 
 // yamlConfig mirrors the YAML structure with string durations.
@@ -30,6 +31,7 @@ type yamlConfig struct {
 	IdleTimeout       string `yaml:"idle_timeout"`
 	ReadHeaderTimeout string `yaml:"read_header_timeout"`
 	LogFile           string `yaml:"log_file"`
+	OrgName           string `yaml:"org_name"`
 }
 
 // DefaultConfig returns configuration with sensible defaults.
@@ -43,6 +45,7 @@ func DefaultConfig() Config {
 		IdleTimeout:       60 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
 		LogFile:           "access.log",
+		OrgName:           "",
 	}
 }
 
@@ -73,6 +76,9 @@ func LoadConfig(path string) (Config, error) {
 	}
 	if yc.LogFile != "" {
 		cfg.LogFile = yc.LogFile
+	}
+	if yc.OrgName != "" {
+		cfg.OrgName = yc.OrgName
 	}
 
 	// Durations.
