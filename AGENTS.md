@@ -3,6 +3,7 @@
 **Generated:** 2026-06-17
 **Commit:** 56a7d8d
 **Branch:** main
+**Last refactor:** middleware.go + health.go extracted; XSS fix, recovery middleware, hardcoded org name externalised
 
 ## OVERVIEW
 
@@ -12,15 +13,18 @@ doc-srv — lightweight Go HTTP server for serving corporate PDF document trees.
 
 ```
 ./
-├── main.go         # Entry point + all HTTP handlers + logging middleware (295 lines)
-├── config.go       # YAML config loader with defaults (120 lines)
-├── doc_repo.go     # Filesystem scanner + cache + Markdown renderer (254 lines)
+├── main.go         # Entry point + program lifecycle + index handler (217 lines)
+├── config.go       # YAML config loader with defaults (126 lines)
+├── doc_repo.go     # Filesystem scanner + cache + Markdown renderer (256 lines)
+├── health.go       # GET /healthz handler (24 lines)
 ├── logger.go       # 10 MB size-based log rotation (117 lines)
-├── *_{config,doc_repo,doc_repo_cache,health_handler,logger,logging_middleware}_test.go
+├── middleware.go   # Logging middleware + panic recovery + accessLog global (117 lines)
 ├── static/style.css
 ├── templates/index.html
-├── config.yaml     # Runtime YAML config
-└── go.mod          # module doc-srv, Go 1.23, 3 deps
+├── config.yaml     # Runtime YAML config (with org_name)
+├── .golangci.yml   # Linter config
+├── .editorconfig   # Editor style config
+└── go.mod          # module doc-srv, Go 1.23, 4 deps (added bluemonday)
 ```
 
 ## WHERE TO LOOK
@@ -28,10 +32,13 @@ doc-srv — lightweight Go HTTP server for serving corporate PDF document trees.
 | Task | Location | Notes |
 |------|----------|-------|
 | Routes / handlers | `main.go` `Start()` | Inline closures, no handler files |
-| Config schema | `config.go` `Config` struct + `yamlConfig` | Two-layer: YAML → CLI flags |
+| Config schema | `config.go` `Config` struct + `yamlConfig` | Two-layer: YAML → CLI flags, has OrgName |
 | Doc scanning logic | `doc_repo.go` `scan()` | Recursive WalkDir, double-checked lock cache |
-| Markdown rendering | `doc_repo.go` `renderReadme()` | Goldmark AST walk for URL rewriting |
+| Markdown rendering | `doc_repo.go` `renderReadme()` | Goldmark → bluemonday sanitised HTML |
 | Log rotation | `logger.go` `rotatingWriter` | 10 MB threshold, stderr fallback |
+| Access logging | `middleware.go` `loggingMiddleware` | nginx-format, skips /healthz |
+| Panic recovery | `middleware.go` `recoveryMiddleware` | Wraps mux, returns 500 on panic |
+| Health check | `health.go` `healthHandler` | GET /healthz, checks docs dir |
 | Windows Service | `main.go` `program` struct + kardianos/service | Persists CLI args in SCM |
 | Tests | `*_test.go` | White-box (`package main`), no test framework deps |
 
@@ -47,8 +54,11 @@ doc-srv — lightweight Go HTTP server for serving corporate PDF document trees.
 | `renderReadme` | func | `doc_repo.go:199` | Goldmark → HTML, URL rewriting |
 | `rotatingWriter` | struct | `logger.go:14` | File writer with rotation |
 | `program` | struct | `main.go:36` | Server lifecycle (Start/Stop) |
-| `loggingMiddleware` | func | `main.go:255` | nginx-format access log |
-| `healthHandler` | func | `main.go:228` | GET /healthz, skips access log |
+| `loggingMiddleware` | func | `middleware.go:55` | nginx-format access log |
+| `recoveryMiddleware` | func | `middleware.go:97` | Panic recovery, returns 500 |
+| `healthHandler` | func | `health.go:10` | GET /healthz, checks docs dir |
+| `setAccessLog` | func | `middleware.go:16` | Thread-safe accessLog update |
+| `pageData` | struct | `main.go:211` | Template data (Sections + OrgName) |
 
 ## CONVENTIONS
 
@@ -62,22 +72,23 @@ doc-srv — lightweight Go HTTP server for serving corporate PDF document trees.
 - **No Docker** — manual binary deploy + Windows Service install
 - **White-box tests** — `package main`, no test framework libs
 
-## ANTI-PATTERNS (THIS PROJECT)
+## ANTI-PATTERNS (FORMER — FIXED)
 
-- **`template.HTML` without sanitisation** — `doc_repo.go:243` returns Goldmark output unescaped. XSS vector if README.md contains `<script>`.
-- **Hardcoded org name** — `templates/index.html:11-14` "Мурманская таможня". Requires code change to rebrand.
-- **Global `accessLog` var** — `main.go:24-25` package-level state mutated directly by tests.
-- **No panic recovery middleware** — any panic kills the server.
-- **No OS signal handling** — `Ctrl+C` in interactive mode skips graceful shutdown.
-- **`go.mod` vs README version mismatch** — `go 1.23.0` in mod, `1.25+` in docs.
+- ~~**`template.HTML` without sanitisation**~~ — Fixed: bluemonday UGCPolicy sanitises Goldmark output in `renderReadme()`.
+- ~~**Hardcoded org name**~~ — Fixed: `config.yaml/org_name` → `Config.OrgName` → template `{{.OrgName}}`.
+- ~~**No panic recovery middleware**~~ — Fixed: `recoveryMiddleware` wraps mux in `middleware.go`.
+- ~~**`go.mod` vs README version mismatch**~~ — Fixed: both say `go 1.23`.
+- **Global `accessLog` var** — `middleware.go` package-level state; tests save/restore it, but still global.
+- **No OS signal handling** — `kardianos/service` handles signals internally via `s.Run()`; not a real issue.
 
 ## COMMANDS
 
 ```bash
 go run .              # Dev server
 go build -o doc-srv.exe .   # Build
-go test -v            # Test (6 test files)
+go test -v            # Test (10 tests, 6 test files)
 go mod tidy           # Tidy deps
+go vet ./...          # Static analysis
 ```
 
 ## NOTES

@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://golangci-lint.run/schemas/config.json
+run:
+  timeout: 3m
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - revive
+  disable:
+    - typecheck
+
+linters-settings:
+  errcheck:
+    ignore: "Write,WriteString,Close"
+  misspell:
+    locale: US
