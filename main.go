@@ -160,13 +160,22 @@ func (p *program) Stop(s service.Service) error {
 	return nil
 }
 
+// version переопределяется при сборке флагом -ldflags -X main.version=x.y.z
+var version = "dev"
+
 func main() {
 	// Flags
 	configPath := flag.String("config", "config.yaml", "Path to config file")
 	docsDirOverride := flag.String("dir", "", "Directory containing PDF files (overrides config)")
 	portOverride := flag.String("port", "", "Server port (overrides config)")
 	svcFlag := flag.String("service", "", "Control the system service: install, uninstall, start, stop")
+	showVersion := flag.Bool("version", false, "Show version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("doc-srv version %s\n", version)
+		return
+	}
 
 	// Load config (defaults + optional YAML file).
 	cfg, err := LoadConfig(*configPath)

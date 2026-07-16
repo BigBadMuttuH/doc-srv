@@ -40,6 +40,18 @@ go build -o doc-srv.exe .
 GOOS=windows GOARCH=amd64 go build -o doc-srv.exe .
 ```
 
+Сборка с указанием версии (рекомендуется):
+
+```bash
+go build -ldflags="-X main.version=1.0.0" -o doc-srv.exe .
+```
+
+Проверить версию:
+
+```bash
+./doc-srv.exe -version
+```
+
 **На сервере:**
 
 1.  Скопируйте `doc-srv.exe` и `config.yaml` на сервер в одну папку.
