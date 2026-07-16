@@ -294,9 +294,13 @@ func headingID(text string) string {
 
 // isRelativeURL возвращает true, если URL выглядит как относительный путь
 // внутри README (не начинается с '/' или http/https).
+// Фрагменты (#) не переписываются — это якоря внутри страницы.
 func isRelativeURL(u string) bool {
 	lower := strings.ToLower(u)
 	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		return false
+	}
+	if strings.HasPrefix(lower, "#") {
 		return false
 	}
 	return !strings.HasPrefix(lower, "/")
