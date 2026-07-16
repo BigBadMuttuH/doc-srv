@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -266,6 +267,14 @@ func renderReadme(path string, relDir string) (template.HTML, error) {
 	p := bluemonday.UGCPolicy()
 	p.AllowAttrs("id").Globally()
 	clean := p.Sanitize(raw)
+
+	// Добавляем target="_blank" ко всем ссылкам в README, чтобы PDF/документы
+	// открывались в новой вкладке. Удаляем rel-атрибут от bluemonday и заменяем своим.
+	reLink := regexp.MustCompile(`<a\s`)
+	reRel := regexp.MustCompile(`\s+rel="[^"]*"`)
+	clean = reRel.ReplaceAllString(clean, "")
+	clean = reLink.ReplaceAllString(clean, `<a target="_blank" rel="noopener noreferrer" `)
+
 	return template.HTML(clean), nil
 }
 
