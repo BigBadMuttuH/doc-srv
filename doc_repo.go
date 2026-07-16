@@ -216,10 +216,24 @@ func renderReadme(path string, relDir string) (template.HTML, error) {
 
 	basePrefix := "/docs/" + relDir + "/"
 
-	// Проходим по AST и переписываем относительные URL.
+	// Проходим по AST: генерируем id для h2 и переписываем относительные URL.
 	ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
 			return ast.WalkContinue, nil
+		}
+
+		// Генерируем id-атрибут для заголовков h2 (для якорей в оглавлении).
+		if heading, ok := n.(*ast.Heading); ok && heading.Level == 2 {
+			var textBuf strings.Builder
+			for c := heading.FirstChild(); c != nil; c = c.NextSibling() {
+				if t, ok := c.(*ast.Text); ok {
+					textBuf.Write(t.Value(content))
+				}
+			}
+			text := strings.TrimSpace(textBuf.String())
+			if text != "" {
+				heading.SetAttributeString("id", []byte(headingID(text)))
+			}
 		}
 
 		rewrite := func(dest []byte) []byte {
@@ -247,9 +261,35 @@ func renderReadme(path string, relDir string) (template.HTML, error) {
 	}
 
 	// Санитизируем HTML, чтобы не допустить XSS через README.md.
+	// Кастомная политика: разрешаем id-атрибут на любых элементах (для якорей).
 	raw := buf.String()
-	clean := bluemonday.UGCPolicy().Sanitize(raw)
+	p := bluemonday.UGCPolicy()
+	p.AllowAttrs("id").Globally()
+	clean := p.Sanitize(raw)
 	return template.HTML(clean), nil
+}
+
+// headingID генерирует id-якорь из текста заголовка.
+// Схема: lowercase, пробелы → дефисы, удалить всё кроме [a-zа-яё0-9_-], префикс "h2-".
+func headingID(text string) string {
+	id := strings.ToLower(text)
+	id = strings.ReplaceAll(id, " ", "-")
+	var b strings.Builder
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'а' && r <= 'я':
+			b.WriteRune(r)
+		case r == 'ё':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '_' || r == '-':
+			b.WriteRune(r)
+		}
+	}
+	return "h2-" + b.String()
 }
 
 // isRelativeURL возвращает true, если URL выглядит как относительный путь
