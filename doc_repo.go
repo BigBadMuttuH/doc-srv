@@ -268,12 +268,10 @@ func renderReadme(path string, relDir string) (template.HTML, error) {
 	p.AllowAttrs("id").Globally()
 	clean := p.Sanitize(raw)
 
-	// Добавляем target="_blank" ко всем ссылкам в README, чтобы PDF/документы
-	// открывались в новой вкладке. Удаляем rel-атрибут от bluemonday и заменяем своим.
-	reLink := regexp.MustCompile(`<a\s`)
-	reRel := regexp.MustCompile(`\s+rel="[^"]*"`)
-	clean = reRel.ReplaceAllString(clean, "")
-	clean = reLink.ReplaceAllString(clean, `<a target="_blank" rel="noopener noreferrer" `)
+	// Добавляем target="_blank" только к ссылкам на PDF-файлы, чтобы они
+	// открывались в новой вкладке. Внутренние якоря (#h2-...) не трогаем.
+	rePDF := regexp.MustCompile(`(?i)<a\s+href="([^"]*\.pdf)"[^>]*>`)
+	clean = rePDF.ReplaceAllString(clean, `<a target="_blank" rel="noopener noreferrer" href="$1">`)
 
 	return template.HTML(clean), nil
 }
